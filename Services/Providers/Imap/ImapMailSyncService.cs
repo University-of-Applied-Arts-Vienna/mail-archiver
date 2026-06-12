@@ -1059,14 +1059,14 @@ namespace MailArchiver.Services.Providers.Imap
                                     _logger.LogDebug("Constructed Message-ID: {ConstructedMessageId}", messageId);
                                 }
 
-                                var isArchived = await _context.ArchivedEmails
-                                    .AnyAsync(e => e.MessageId == messageId && e.MailAccountId == account.Id);
+                                var isArchived = await _context.ByAccountAndMessageId(account.Id, messageId)
+                                    .AnyAsync();
 
                                 if (!isArchived && !string.IsNullOrEmpty(messageId) && !messageId.StartsWith("<"))
                                 {
                                     var messageIdWithBrackets = $"<{messageId}>";
-                                    isArchived = await _context.ArchivedEmails
-                                        .AnyAsync(e => e.MessageId == messageIdWithBrackets && e.MailAccountId == account.Id);
+                                    isArchived = await _context.ByAccountAndMessageId(account.Id, messageIdWithBrackets)
+                                        .AnyAsync();
 
                                     if (isArchived)
                                     {
@@ -1076,8 +1076,8 @@ namespace MailArchiver.Services.Providers.Imap
                                 else if (!isArchived && !string.IsNullOrEmpty(messageId) && messageId.StartsWith("<") && messageId.EndsWith(">"))
                                 {
                                     var messageIdWithoutBrackets = messageId.Substring(1, messageId.Length - 2);
-                                    isArchived = await _context.ArchivedEmails
-                                        .AnyAsync(e => e.MessageId == messageIdWithoutBrackets && e.MailAccountId == account.Id);
+                                    isArchived = await _context.ByAccountAndMessageId(account.Id, messageIdWithoutBrackets)
+                                        .AnyAsync();
 
                                     if (isArchived)
                                     {

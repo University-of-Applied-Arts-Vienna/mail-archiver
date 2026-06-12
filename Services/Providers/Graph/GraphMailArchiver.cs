@@ -124,18 +124,29 @@ namespace MailArchiver.Services.Providers.Graph
                 var checkSubject = message.Subject ?? "(No Subject)";
                 var checkDate = message.SentDateTime?.DateTime ?? DateTime.UtcNow;
 
-                var existingInfo = await _context.ArchivedEmails
+                // Two separate, index-backed probes instead of one OR query that had to
+                // scan the whole account: the MessageId check uses the
+                // (MailAccountId, md5(MessageId)) expression index, the metadata
+                // fallback uses the (MailAccountId, SentDate) index via a date range.
+                var existingInfo = await _context.ByAccountAndMessageId(accountId, messageId)
                     .AsNoTracking()
-                    .Where(e => e.MailAccountId == accountId)
-                    .Where(e =>
-                        e.MessageId == messageId ||
-                        (e.From == checkFrom &&
-                         e.To == checkTo &&
-                         e.Subject == checkSubject &&
-                         Math.Abs((e.SentDate - checkDate).TotalSeconds) < 2)
-                    )
                     .Select(e => new { e.Id, e.FolderName, e.Subject })
                     .FirstOrDefaultAsync();
+
+                if (existingInfo == null)
+                {
+                    var windowStart = checkDate.AddSeconds(-2);
+                    var windowEnd = checkDate.AddSeconds(2);
+                    existingInfo = await _context.ArchivedEmails
+                        .AsNoTracking()
+                        .Where(e => e.MailAccountId == accountId)
+                        .Where(e => e.SentDate > windowStart && e.SentDate < windowEnd)
+                        .Where(e => e.From == checkFrom &&
+                                    e.To == checkTo &&
+                                    e.Subject == checkSubject)
+                        .Select(e => new { e.Id, e.FolderName, e.Subject })
+                        .FirstOrDefaultAsync();
+                }
 
                 if (existingInfo != null)
                 {

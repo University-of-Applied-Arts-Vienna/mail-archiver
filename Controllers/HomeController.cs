@@ -5,6 +5,7 @@ using MailArchiver.Services;
 using MailArchiver.Services.Shared;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using System.Diagnostics;
 using System.Globalization;
 
@@ -19,14 +20,22 @@ namespace MailArchiver.Controllers
         private readonly IBatchRestoreService? _batchRestoreService;
         private readonly MailArchiver.Services.IAuthenticationService _authenticationService;
         private readonly IVersionUpdateService _versionUpdateService;
+        private readonly IMemoryCache _cache;
+
+        // The dashboard statistics aggregate the whole archive (counts, group-bys);
+        // computing them on every page view caused long-running queries that competed
+        // with sync I/O. A short cache removes that load without making the numbers
+        // noticeably stale.
+        private static readonly TimeSpan DashboardCacheDuration = TimeSpan.FromMinutes(5);
 
         public HomeController(
-            MailArchiver.Services.Core.EmailCoreService emailCoreService, 
+            MailArchiver.Services.Core.EmailCoreService emailCoreService,
             IUserService userService,
             MailArchiverDbContext context,
             MailArchiver.Services.IAuthenticationService authenticationService,
             IVersionUpdateService versionUpdateService,
-            ILogger<HomeController> logger, 
+            ILogger<HomeController> logger,
+            IMemoryCache cache,
             IBatchRestoreService? batchRestoreService = null)
         {
             _emailCoreService = emailCoreService;
@@ -35,6 +44,7 @@ namespace MailArchiver.Controllers
             _authenticationService = authenticationService;
             _versionUpdateService = versionUpdateService;
             _logger = logger;
+            _cache = cache;
             _batchRestoreService = batchRestoreService;
         }
 
@@ -45,25 +55,30 @@ namespace MailArchiver.Controllers
             var currentUser = await _userService.GetUserByUsernameAsync(currentUsername);
             
             DashboardViewModel model;
-            
+
             // If user is admin, show all accounts, otherwise show only assigned accounts
             if (currentUser != null && currentUser.IsAdmin)
             {
-                model = await _emailCoreService.GetDashboardStatisticsAsync();
+                model = await GetCachedDashboardAsync("dashboard:admin",
+                    () => _emailCoreService.GetDashboardStatisticsAsync());
             }
             else if (currentUser != null)
             {
                 // Get only accounts assigned to this user
                 var userAccounts = await _userService.GetUserMailAccountsAsync(currentUser.Id);
-                var accountIds = userAccounts.Select(a => a.Id).ToList();
-                
-                // Create a custom dashboard model for this user
-                model = await CreateCustomDashboardStatisticsAsync(accountIds);
+                var accountIds = userAccounts.Select(a => a.Id).OrderBy(id => id).ToList();
+
+                // Create a custom dashboard model for this user (cached per account set,
+                // so users with the same assignments share one cache entry)
+                var cacheKey = "dashboard:accounts:" + string.Join(",", accountIds);
+                model = await GetCachedDashboardAsync(cacheKey,
+                    () => CreateCustomDashboardStatisticsAsync(accountIds));
             }
             else
             {
                 // Fallback to default dashboard
-                model = await _emailCoreService.GetDashboardStatisticsAsync();
+                model = await GetCachedDashboardAsync("dashboard:admin",
+                    () => _emailCoreService.GetDashboardStatisticsAsync());
             }
 
             // Aktive Jobs für Dashboard anzeigen
@@ -132,6 +147,17 @@ namespace MailArchiver.Controllers
 
             await _versionUpdateService.DismissVersionAsync(currentUser.Id);
             return Ok();
+        }
+
+        private async Task<DashboardViewModel> GetCachedDashboardAsync(
+            string cacheKey, Func<Task<DashboardViewModel>> factory)
+        {
+            var model = await _cache.GetOrCreateAsync(cacheKey, entry =>
+            {
+                entry.AbsoluteExpirationRelativeToNow = DashboardCacheDuration;
+                return factory();
+            });
+            return model!;
         }
 
         private async Task<DashboardViewModel> CreateCustomDashboardStatisticsAsync(List<int> accountIds)

@@ -701,29 +701,24 @@ namespace MailArchiver.Services.Providers.Graph
                                 {
                                     var messageId = message.InternetMessageId ?? message.Id;
 
-                                    var archivedEmail = await _context.ArchivedEmails
-                                        .Where(e => e.MailAccountId == account.Id)
-                                        .Where(e => e.MessageId == messageId)
-                                        .FirstOrDefaultAsync();
+                                    // Existence checks via the (MailAccountId, md5(MessageId)) expression index
+                                    var isArchived = !string.IsNullOrEmpty(messageId) &&
+                                        await _context.ByAccountAndMessageId(account.Id, messageId).AnyAsync();
 
-                                    if (archivedEmail == null && !string.IsNullOrEmpty(messageId) && !messageId.StartsWith("<"))
+                                    if (!isArchived && !string.IsNullOrEmpty(messageId) && !messageId.StartsWith("<"))
                                     {
                                         var messageIdWithBrackets = $"<{messageId}>";
-                                        archivedEmail = await _context.ArchivedEmails
-                                            .Where(e => e.MailAccountId == account.Id)
-                                            .Where(e => e.MessageId == messageIdWithBrackets)
-                                            .FirstOrDefaultAsync();
+                                        isArchived = await _context.ByAccountAndMessageId(account.Id, messageIdWithBrackets)
+                                            .AnyAsync();
                                     }
-                                    else if (archivedEmail == null && !string.IsNullOrEmpty(messageId) && messageId.StartsWith("<") && messageId.EndsWith(">"))
+                                    else if (!isArchived && !string.IsNullOrEmpty(messageId) && messageId.StartsWith("<") && messageId.EndsWith(">"))
                                     {
                                         var messageIdWithoutBrackets = messageId.Substring(1, messageId.Length - 2);
-                                        archivedEmail = await _context.ArchivedEmails
-                                            .Where(e => e.MailAccountId == account.Id)
-                                            .Where(e => e.MessageId == messageIdWithoutBrackets)
-                                            .FirstOrDefaultAsync();
+                                        isArchived = await _context.ByAccountAndMessageId(account.Id, messageIdWithoutBrackets)
+                                            .AnyAsync();
                                     }
 
-                                    if (archivedEmail != null)
+                                    if (isArchived)
                                     {
                                         messageIdsToDelete.Add(message.Id!);
                                             _logger.LogDebug("Marking email with Message-ID {MessageId} for deletion from folder {FolderName}",

@@ -1040,8 +1040,10 @@ namespace MailArchiver.Services.Core
             var messageId = message.MessageId ??
                 $"{message.From}-{message.To}-{message.Subject}-{emailDate.Ticks}";
 
-            var existingEmail = await _context.ArchivedEmails
-                .FirstOrDefaultAsync(e => e.MessageId == messageId && e.MailAccountId == account.Id);
+            // Uses the (MailAccountId, md5(MessageId)) expression index - this runs
+            // once per synced message and must not scan the account's archive.
+            var existingEmail = await _context.ByAccountAndMessageId(account.Id, messageId)
+                .FirstOrDefaultAsync();
 
             if (existingEmail != null)
             {

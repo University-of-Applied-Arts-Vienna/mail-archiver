@@ -36,15 +36,24 @@ namespace MailArchiver.Services.Shared
                 var checkTo = string.Join(",", message.To.Mailboxes.Select(m => m.Address));
                 var checkSubject = message.Subject ?? "(No Subject)";
 
-                var existing = await context.ArchivedEmails
-                    .Where(e => e.MailAccountId == account.Id)
-                    .Where(e =>
-                        e.MessageId == messageId ||
-                        (e.From == checkFrom && e.To == checkTo && e.Subject == checkSubject &&
-                         Math.Abs((e.SentDate - message.Date.DateTime).TotalSeconds) < 2))
-                    .FirstOrDefaultAsync();
+                // Two separate, index-backed probes instead of one OR query that had to
+                // scan the whole account (see Data/ArchivedEmailQueries.cs).
+                var isDuplicate = await context.ByAccountAndMessageId(account.Id, messageId)
+                    .AnyAsync();
 
-                if (existing != null)
+                if (!isDuplicate)
+                {
+                    var checkDate = message.Date.DateTime;
+                    var windowStart = checkDate.AddSeconds(-2);
+                    var windowEnd = checkDate.AddSeconds(2);
+                    isDuplicate = await context.ArchivedEmails
+                        .Where(e => e.MailAccountId == account.Id)
+                        .Where(e => e.SentDate > windowStart && e.SentDate < windowEnd)
+                        .Where(e => e.From == checkFrom && e.To == checkTo && e.Subject == checkSubject)
+                        .AnyAsync();
+                }
+
+                if (isDuplicate)
                 {
                     _logger.LogInformation(
                         "Job {JobId}: Skipping duplicate email. Subject: '{Subject}', From: '{From}', MessageId: '{MessageId}'",

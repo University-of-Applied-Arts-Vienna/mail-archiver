@@ -240,10 +240,20 @@ docker-volumes/
 
 # Umgebungsvariablen
 .env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+.env.*
+*.env
+
+# AI assistant artifacts (must never end up in the public fork)
+.claude/
+CLAUDE.md
+CLAUDE.local.md
+.mcp.json
+.cursor/
+.cursorrules
+.aider*
+.codex/
+AGENTS.md
+.clinerules
 
 # Betriebssystemdateien
 .DS_Store

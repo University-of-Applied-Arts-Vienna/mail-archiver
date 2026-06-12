@@ -154,6 +154,9 @@ builder.Services.AddHttpClient("GitHubReleases");
 // Add Session support
 builder.Services.AddDistributedMemoryCache();
 
+// In-memory cache (dashboard statistics etc.)
+builder.Services.AddMemoryCache();
+
 // Get authentication options for SameSite configuration
 var authOptionsConfig = builder.Configuration.GetSection(AuthenticationOptions.Authentication).Get<AuthenticationOptions>() ?? new AuthenticationOptions();
 var cookieSameSiteMode = ParseSameSiteMode(authOptionsConfig.CookieSameSite);
